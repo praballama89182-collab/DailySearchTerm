@@ -521,6 +521,7 @@ with tab_by_term:
                  f"{totals['ACOS']*100:.1f}% ACOS" if pd.notna(totals['ACOS']) else
                  f"{camp}  ·  ${totals['Spend']:,.0f} spend  ·  no sales")
         with st.expander(label):
+            st.code(camp, language=None)
             kpi_cols = st.columns(4)
             kpis = [
                 ("Spend", f"${totals['Spend']:,.0f}", NAVY_SHADES[0]),
@@ -555,6 +556,7 @@ with tab_by_date:
                  f"{totals['ACOS']*100:.1f}% ACOS" if pd.notna(totals['ACOS']) else
                  f"{camp}  ·  ${totals['Spend']:,.0f} spend  ·  no sales")
         with st.expander(label):
+            st.code(camp, language=None)
             kpi_cols = st.columns(4)
             kpis = [
                 ("Spend", f"${totals['Spend']:,.0f}", NAVY_SHADES[0]),
@@ -615,6 +617,7 @@ with tab_conv_nonconv:
 
         label = (f"{camp}  ·  {len(sub)} {view_choice.lower()} term(s)  ·  ${sub_totals['Spend']:,.0f} spend")
         with st.expander(label):
+            st.code(camp, language=None)
             kpi_cols = st.columns(4)
             kpis = [
                 ("Spend", f"${sub_totals['Spend']:,.0f}", NAVY_SHADES[0]),
