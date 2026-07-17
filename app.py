@@ -320,15 +320,13 @@ shown_campaigns = camp_order[:max_campaigns]
 
 camp_groups = df.groupby("Campaign Name")
 
-tab_overview, tab_by_term, tab_by_date, tab_by_term_date = st.tabs(
-    ["📊 Overview", "📋 Campaign → Search Terms", "📅 Campaign → Date", "🔎 Search Term → Date"]
+tab_overview, tab_by_term, tab_by_date, tab_conv_nonconv = st.tabs(
+    ["📊 Overview", "📋 Campaign → Search Terms", "📅 Campaign → Date", "🔀 Converting vs Non-Converting"]
 )
 
 TERM_COLS = ["Customer Search Term", "Match Type", "Impressions", "Clicks",
              "Spend", "Sales", "Orders", "ACOS %", "ROAS", "CVR %", "CTR %"]
 DATE_TERM_COLS = ["Date", "Customer Search Term", "Match Type", "Impressions", "Clicks",
-                  "Spend", "Sales", "Orders", "ACOS %", "ROAS", "CVR %", "CTR %"]
-CAMP_DATE_COLS = ["Campaign Name", "Date", "Impressions", "Clicks",
                   "Spend", "Sales", "Orders", "ACOS %", "ROAS", "CVR %", "CTR %"]
 
 # ----------------------------------------------------------------------
@@ -446,6 +444,52 @@ with tab_overview:
         style_fig(fig, height=380)
         st.plotly_chart(fig, use_container_width=True)
 
+    with st.container(border=True):
+        section_header("Spend Distribution — Non-Converting Search Terms", NAVY_SHADES[4])
+        st.caption("Non-converting terms have zero sales, so ACOS is undefined for every one of them "
+                   "(spend ÷ $0) — an 'ACOS band' chart would just be one meaningless bucket. Spend "
+                   "bands are the useful equivalent here: they show whether wasted spend is concentrated "
+                   "in a handful of expensive terms or spread thin across many cheap ones.")
+        ns_band_metric = st.selectbox("Show", ["Number of search terms", "Spend in band"], key="ns_band_metric")
+        spend_bins = [0, 5, 15, 30, 50, np.inf]
+        spend_labels = ["<$5", "$5–15", "$15–30", "$30–50", ">$50"]
+        ns = no_sales.copy()
+        ns["Spend Band"] = pd.cut(ns["Spend"], bins=spend_bins, labels=spend_labels, right=False)
+        ns_band_agg = ns.groupby("Spend Band", observed=False).agg(
+            Count=("Customer Search Term", "count"), Spend=("Spend", "sum")
+        ).reindex(spend_labels).fillna(0)
+        ns_y_col = "Count" if ns_band_metric == "Number of search terms" else "Spend"
+        fig = go.Figure(go.Bar(
+            x=ns_band_agg.index, y=ns_band_agg[ns_y_col],
+            marker=dict(color=NAVY_SHADES[:len(ns_band_agg)]),
+            text=ns_band_agg[ns_y_col].apply(lambda v: f"{v:,.0f}"), textposition="outside",
+        ))
+        fig.update_layout(xaxis_title="Spend band", yaxis_title=ns_band_metric)
+        style_fig(fig, height=380)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with st.container(border=True):
+        section_header("Non-Converting Spend vs Overall Spend", NAVY_SHADES[0])
+        pct_wasted = (spend_no_sales / totals["Spend"] * 100) if totals["Spend"] > 0 else 0
+        st.caption(f"${spend_no_sales:,.2f} of ${totals['Spend']:,.2f} total spend "
+                   f"({pct_wasted:.1f}%) went to search terms that never generated a sale.")
+        cmp_df = pd.DataFrame({
+            "Group": ["Overall Spend", "Non-Converting Spend"],
+            "Spend": [totals["Spend"], spend_no_sales],
+        })
+        fig = go.Figure(go.Bar(
+            x=cmp_df["Group"], y=cmp_df["Spend"],
+            marker=dict(color=[NAVY_SHADES[1], NAVY_SHADES[5]]),
+            text=[f"${v:,.0f}" for v in cmp_df["Spend"]], textposition="outside",
+        ))
+        fig.add_annotation(
+            x="Non-Converting Spend", y=spend_no_sales, text=f"{pct_wasted:.1f}% of total",
+            showarrow=False, yshift=28, font=dict(size=13, color=NAVY_SHADES[0]),
+        )
+        fig.update_layout(yaxis_title="Spend ($)")
+        style_fig(fig, height=380)
+        st.plotly_chart(fig, use_container_width=True)
+
 # ----------------------------------------------------------------------
 # Tab 2: Campaign → Search Terms
 # ----------------------------------------------------------------------
@@ -515,66 +559,62 @@ with tab_by_date:
                                sort_by=["Date", "Spend"], ascending=[False, False])
 
 # ----------------------------------------------------------------------
-# Tab 4: Search Term → Campaign → Date
+# Tab 4: Converting vs Non-Converting
 # ----------------------------------------------------------------------
 
-with tab_by_term_date:
-    st.caption("Same idea, flipped: pick a search term, see every campaign it ran under and its "
-               f"day-by-day performance in one scrollable table. ACOS below {acos_threshold:.0f}% "
-               "is light green; at/above (or no sales) is light red.")
+with tab_conv_nonconv:
+    st.caption("Pick a view, then expand a campaign to see just its converting or just its "
+               f"non-converting search terms. ACOS below {acos_threshold:.0f}% is light green; "
+               "at/above (or no sales) is light red.")
 
-    st.markdown("###### Search term filter")
-    fcol1, fcol2, fcol3 = st.columns([2, 1, 1])
+    fcol1, fcol2 = st.columns([1, 1])
     with fcol1:
-        term_query = st.text_input("Search term contains", key="term_query")
+        view_choice = st.radio("View", ["Non-Converting", "Converting"], horizontal=True, key="conv_view")
     with fcol2:
-        sort_terms_by = st.selectbox("Sort terms by", ["Spend", "Sales", "Clicks", "Customer Search Term"],
-                                      key="sort_terms_by")
-    with fcol3:
-        max_terms = st.slider("Max terms to show", min_value=5, max_value=200, value=30, step=5, key="max_terms")
+        min_clicks_nonconv = 0
+        if view_choice == "Non-Converting":
+            min_clicks_nonconv = st.number_input(
+                "Min clicks (non-converting terms only)", min_value=0, value=1, step=1, key="min_clicks_nonconv",
+                help="Filters out negligible non-converting terms — e.g. a single stray click with no "
+                     "sale is less actionable than a term with 20 clicks and still no sale."
+            )
 
-    term_totals_all = aggregate(df, ["Customer Search Term"])
-    if term_query:
-        term_totals_all = term_totals_all[
-            term_totals_all["Customer Search Term"].str.contains(term_query, case=False, na=False)
-        ]
+    shown_any = False
+    for camp in shown_campaigns:
+        g = camp_groups.get_group(camp)
+        term_agg = aggregate(g, ["Customer Search Term", "Match Type"])
 
-    if term_totals_all.empty:
-        st.warning("No search terms match that filter.")
-    else:
-        if sort_terms_by == "Customer Search Term":
-            term_order = term_totals_all.sort_values("Customer Search Term")["Customer Search Term"].tolist()
+        if view_choice == "Converting":
+            sub = term_agg[term_agg["Sales"] > 0]
         else:
-            term_order = term_totals_all.sort_values(sort_terms_by, ascending=False)["Customer Search Term"].tolist()
-        shown_terms = term_order[:max_terms]
+            sub = term_agg[(term_agg["Sales"] == 0) & (term_agg["Clicks"] >= min_clicks_nonconv)]
 
-        if len(term_order) > max_terms:
-            st.info(f"Showing the top {max_terms} of {len(term_order)} matching search terms "
-                     f"(sorted by {sort_terms_by}). Narrow the search box or raise the limit above to see more.")
+        if sub.empty:
+            continue
+        shown_any = True
 
-        term_groups = df.groupby("Customer Search Term")
-        for term in shown_terms:
-            t = term_groups.get_group(term)
-            t_totals = aggregate(t, ["Customer Search Term"]).iloc[0]
-            label = (f"{term}  ·  ${t_totals['Spend']:,.0f} spend  ·  "
-                     f"{t_totals['ACOS']*100:.1f}% ACOS" if pd.notna(t_totals['ACOS']) else
-                     f"{term}  ·  ${t_totals['Spend']:,.0f} spend  ·  no sales")
-            with st.expander(label):
-                kpi_cols = st.columns(4)
-                kpis = [
-                    ("Spend", f"${t_totals['Spend']:,.0f}", NAVY_SHADES[0]),
-                    ("Sales", f"${t_totals['Sales']:,.0f}", NAVY_SHADES[2]),
-                    ("ACOS", f"{t_totals['ACOS']*100:.1f}%" if pd.notna(t_totals['ACOS']) else "—", NAVY_SHADES[4]),
-                    ("ROAS", f"{t_totals['ROAS']:.2f}" if pd.notna(t_totals['ROAS']) else "—", NAVY_SHADES[1]),
-                ]
-                for col, (lbl, val, color) in zip(kpi_cols, kpis):
-                    with col:
-                        st.markdown(kpi_card(lbl, val, color), unsafe_allow_html=True)
+        sub_totals = compute_metrics(pd.DataFrame([{
+            "Impressions": sub["Impressions"].sum(), "Clicks": sub["Clicks"].sum(),
+            "Spend": sub["Spend"].sum(), "Sales": sub["Sales"].sum(), "Orders": sub["Orders"].sum(),
+        }])).iloc[0]
 
-                camp_date_agg = aggregate(t, ["Campaign Name", "Date"])
-                disp = format_term_table(camp_date_agg)
-                disp["Date"] = disp["Date"].dt.strftime("%Y-%m-%d")
-                n_campaigns = t["Campaign Name"].nunique()
-                st.markdown(f"**Runs under {n_campaigns} campaign(s), {len(disp)} campaign × date row(s)**")
-                render_term_table(disp, CAMP_DATE_COLS, acos_threshold, height=500,
-                                   sort_by=["Campaign Name", "Date"], ascending=[True, False])
+        label = (f"{camp}  ·  {len(sub)} {view_choice.lower()} term(s)  ·  ${sub_totals['Spend']:,.0f} spend")
+        with st.expander(label):
+            kpi_cols = st.columns(4)
+            kpis = [
+                ("Spend", f"${sub_totals['Spend']:,.0f}", NAVY_SHADES[0]),
+                ("Sales", f"${sub_totals['Sales']:,.0f}", NAVY_SHADES[2]),
+                ("ACOS", f"{sub_totals['ACOS']*100:.1f}%" if pd.notna(sub_totals['ACOS']) else "—", NAVY_SHADES[4]),
+                ("ROAS", f"{sub_totals['ROAS']:.2f}" if pd.notna(sub_totals['ROAS']) else "—", NAVY_SHADES[1]),
+            ]
+            for col, (lbl, val, color) in zip(kpi_cols, kpis):
+                with col:
+                    st.markdown(kpi_card(lbl, val, color), unsafe_allow_html=True)
+
+            disp = format_term_table(sub)
+            st.markdown(f"**{len(disp)} {view_choice.lower()} search term(s)**")
+            render_term_table(disp, TERM_COLS, acos_threshold)
+
+    if not shown_any:
+        st.info(f"No campaigns have {view_choice.lower()} search terms matching the current filters"
+                + (f" and the {min_clicks_nonconv}-click minimum." if view_choice == "Non-Converting" else "."))
