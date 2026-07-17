@@ -270,20 +270,18 @@ match_types = sorted(raw_scoped["Match Type"].dropna().unique())
 selected_match_types = st.sidebar.multiselect("Match Type", match_types, default=[])
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Campaign search")
-campaign_query = st.sidebar.text_input("Campaign name")
-match_mode = st.sidebar.radio("Match mode", ["Contains", "Starts with"], horizontal=True)
-
-st.sidebar.markdown("---")
 st.sidebar.subheader("Display settings")
 acos_threshold = st.sidebar.number_input("ACOS highlight threshold (%)", min_value=0.0, value=5.0, step=1.0,
                                           help="Below this = light green. At/above this (or no sales) = light red.")
 sort_campaigns_by = st.sidebar.selectbox("Sort campaigns by", ["Spend", "Sales", "Clicks", "Campaign Name"])
-max_campaigns = st.sidebar.slider("Max campaigns to display", min_value=5, max_value=200, value=30, step=5,
-                                   help="Keeps the page responsive — narrow with the search box above to see more.")
+max_campaigns = st.sidebar.slider("Max campaigns to display", min_value=5, max_value=500, value=500, step=5,
+                                   help="Every campaign with at least 1 click in the date range qualifies — "
+                                        "this only caps how many render at once for page speed. Defaults to "
+                                        "500 so it effectively shows all of them; lower it if the page feels slow.")
 
 # ----------------------------------------------------------------------
-# Filter
+# Filter (date / portfolio category / match type — campaign name search
+# happens further down, in the main area, right above the campaign list)
 # ----------------------------------------------------------------------
 
 df = raw_scoped[(raw_scoped["Date"].dt.date >= start_date) & (raw_scoped["Date"].dt.date <= end_date)].copy()
@@ -291,6 +289,21 @@ if selected_categories:
     df = df[df["Portfolio Category"].isin(selected_categories)]
 if selected_match_types:
     df = df[df["Match Type"].isin(selected_match_types)]
+
+if df.empty:
+    st.warning("No rows match the current filters.")
+    st.stop()
+
+st.title("Campaign → Search Term Explorer")
+
+st.markdown("###### Campaign name search")
+scol1, scol2 = st.columns([3, 1])
+with scol1:
+    campaign_query = st.text_input("Campaign name", label_visibility="collapsed",
+                                    placeholder="Search or filter by campaign name / prefix…")
+with scol2:
+    match_mode = st.radio("Match mode", ["Contains", "Starts with"], horizontal=True, label_visibility="collapsed")
+
 if campaign_query:
     if match_mode == "Contains":
         df = df[df["Campaign Name"].str.contains(campaign_query, case=False, na=False)]
@@ -305,13 +318,15 @@ if df.empty:
     st.warning("No rows match the current filters.")
     st.stop()
 
-st.title("Campaign → Search Term Explorer")
 scope_label = "FBA portfolios only (excl. Vizari)" if fba_only else "all portfolios"
 st.caption(f"{df['Campaign Name'].nunique()} campaigns match · {scope_label} · "
            f"{start_date} → {end_date} · {len(df):,} rows · search terms with zero clicks excluded")
 
-# campaign ranking / limiting
+# campaign ranking / limiting — a campaign qualifies once it has at least 1 click
+# in the current date range (redundant with the term-level click filter above,
+# but made explicit here so campaign inclusion isn't just an incidental side effect)
 camp_totals = aggregate(df, ["Campaign Name"])
+camp_totals = camp_totals[camp_totals["Clicks"] >= 1]
 if sort_campaigns_by == "Campaign Name":
     camp_order = camp_totals.sort_values("Campaign Name")["Campaign Name"].tolist()
 else:
