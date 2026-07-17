@@ -166,7 +166,7 @@ def format_term_table(agg_df: pd.DataFrame) -> pd.DataFrame:
     disp["ACOS %"] = (disp["ACOS"] * 100).round(1)
     disp["ROAS"] = disp["ROAS"].round(2)
     disp["CTR %"] = (disp["CTR"] * 100).round(2)
-    disp["CVR %"] = (disp["CVR"] * 100).round(2)
+    disp["CPC"] = disp["CPC"].round(2)
     disp["Spend"] = disp["Spend"].round(2)
     disp["Sales"] = disp["Sales"].round(2)
     return disp
@@ -340,9 +340,9 @@ tab_overview, tab_by_term, tab_by_date, tab_conv_nonconv = st.tabs(
 )
 
 TERM_COLS = ["Customer Search Term", "Match Type", "Impressions", "Clicks",
-             "Spend", "Sales", "Orders", "ACOS %", "ROAS", "CVR %", "CTR %"]
+             "Spend", "Sales", "Orders", "ACOS %", "ROAS", "CPC", "CTR %"]
 DATE_TERM_COLS = ["Date", "Customer Search Term", "Match Type", "Impressions", "Clicks",
-                  "Spend", "Sales", "Orders", "ACOS %", "ROAS", "CVR %", "CTR %"]
+                  "Spend", "Sales", "Orders", "ACOS %", "ROAS", "CPC", "CTR %"]
 
 # ----------------------------------------------------------------------
 # Tab 1: Overview
@@ -359,7 +359,7 @@ with tab_overview:
         ("Spend", f"${totals['Spend']:,.0f}"),
         ("ACOS", f"{totals['ACOS']*100:.1f}%" if pd.notna(totals['ACOS']) else "—"),
         ("CTR", f"{totals['CTR']*100:.2f}%" if pd.notna(totals['CTR']) else "—"),
-        ("CVR", f"{totals['CVR']*100:.2f}%" if pd.notna(totals['CVR']) else "—"),
+        ("CPC", f"${totals['CPC']:.2f}" if pd.notna(totals['CPC']) else "—"),
         ("ROAS", f"{totals['ROAS']:.2f}" if pd.notna(totals['ROAS']) else "—"),
     ]
     kpi_cols = st.columns(6)
